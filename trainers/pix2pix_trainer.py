@@ -72,6 +72,8 @@ class Pix2PixTrainer():
         self.out = out
 
     def run_discriminator_one_step(self, data):
+        if getattr(self.opt, 'physics_only', False):
+            return
         self.optimizer_D.zero_grad()
         GforD = {}
         GforD['fake_image'] = self.out['fake_image']
@@ -88,7 +90,12 @@ class Pix2PixTrainer():
         self.d_losses = d_losses
 
     def get_latest_losses(self):
-        return {**self.g_losses, **self.d_losses}
+        metrics = getattr(self, 'out', {}).get('physics_metrics', {})
+        return {**self.g_losses, **self.d_losses, **metrics}
+
+    def set_epoch(self, epoch):
+        if self.pix2pix_model_on_one_gpu.physics_loss is not None:
+            self.pix2pix_model_on_one_gpu.physics_active = epoch >= self.opt.physics_start_epoch
 
     def get_latest_generated(self):
         return self.out['fake_image']

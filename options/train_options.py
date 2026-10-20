@@ -30,6 +30,19 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--real_reference_probability', type=float, default=0.0, help='self-supervised training probability')
         parser.add_argument('--hard_reference_probability', type=float, default=0.0, help='hard reference training probability')
         # training loss weights
+        parser.add_argument('--lambda_phys', type=float, default=0.0)
+        parser.add_argument('--physics_config', type=str, default='')
+        parser.add_argument('--physics_feature_checkpoint', type=str, default='')
+        parser.add_argument('--physics_loss_mode', choices=('features', 'pixel_l1'), default='features')
+        parser.add_argument('--physics_feature_padding', choices=('reject', 'replicate'), default='reject',
+                            help='Explicit feature-only right/bottom padding for detector sizes not divisible by 8')
+        parser.add_argument('--physics_layers', type=int, nargs='+', default=[0, 1, 2, 3])
+        parser.add_argument('--physics_layer_weights', type=float, nargs='+', default=[1., 1., 1., 1.])
+        parser.add_argument('--physics_start_epoch', type=int, default=1,
+                            help='Enable only once the phase prediction stage is trained')
+        parser.add_argument('--physics_only', action='store_true', help='Optimize only physics; skip D updates')
+        parser.add_argument('--sh_image_dir', type=str, default='images')
+        parser.add_argument('--physics_amplitude_dir', type=str, default='', help='Same-stem .npy amplitude maps')
         parser.add_argument('--weight_warp_self', type=float, default=0.0, help='push warp self to ref')
         parser.add_argument('--weight_warp_cycle', type=float, default=0.0, help='push warp cycle to ref')
         parser.add_argument('--weight_novgg_featpair', type=float, default=10.0, help='in no vgg setting, use pair feat loss in domain adaptation')

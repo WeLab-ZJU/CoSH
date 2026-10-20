@@ -37,8 +37,20 @@ class Pix2PixModel(torch.nn.Module):
         self.ByteTensor = torch.cuda.ByteTensor if self.use_gpu() \
             else torch.ByteTensor
         self.net = torch.nn.ModuleDict(self.initialize_networks(opt))
-        # set loss functions
+        self.physics_loss = None
+        self.physics_active = False
         if opt.isTrain:
+            import math
+            if not math.isfinite(getattr(opt, 'lambda_phys', 0.0)) or getattr(opt, 'lambda_phys', 0.0) < 0:
+                raise ValueError('lambda_phys must be finite and nonnegative')
+            if getattr(opt, 'physics_only', False) and getattr(opt, 'lambda_phys', 0.0) <= 0:
+                raise ValueError('physics_only requires lambda_phys > 0')
+            if getattr(opt, 'lambda_phys', 0.0) > 0:
+                from models.physics import build_physics_loss
+                self.physics_loss = build_physics_loss(opt, self.net['netCorr'].adaptive_model_seg)
+                self.physics_active = opt.physics_start_epoch <= 1
+        # set loss functions
+        if opt.isTrain and not getattr(opt, 'physics_only', False):
             # vgg network
             self.vggnet_fix = networks.architecture.VGG19_feature_color_torchversion(vgg_normal_correct=opt.vgg_normal_correct, ic=3)
             self.vggnet_fix.load_state_dict(torch.load('vgg/vgg19_conv.pth'))
@@ -66,10 +78,28 @@ class Pix2PixModel(torch.nn.Module):
         generated_out = {}
 
         if mode == 'generator':
-            g_loss, generated_out = self.compute_generator_loss(input_label, \
+            if getattr(self.opt, 'physics_only', False):
+                if not self.physics_active:
+                    raise ValueError('physics_only requires an active physics epoch')
+                with autocast(enabled=self.opt.amp):
+                    corr = self.net['netCorr'](ref_image, real_image, input_semantics, ref_semantics)
+                    generated_out = {**corr, 'fake_image': self.net['netG'](input_semantics, warp_out=corr['warp_out'])}
+                g_loss = {}
+            else:
+                g_loss, generated_out = self.compute_generator_loss(input_label, \
                                     input_semantics, real_image, ref_label, \
                                     ref_semantics, ref_image, self_ref)
             out = {}
+            if self.physics_loss is not None:
+                existing = sum(g_loss.values()).mean() if g_loss else generated_out['fake_image'].new_zeros(())
+                raw = existing.new_zeros(())
+                if self.physics_active:
+                    raw = self.physics_loss(generated_out['fake_image'].float(),
+                                            real_image, data.get('physics_amplitude'))
+                    g_loss['physics'] = self.opt.lambda_phys * raw
+                total = existing + self.opt.lambda_phys * raw
+                out['physics_metrics'] = {'L_phys': raw.detach(), 'G_total_existing': existing.detach(),
+                                          'G_total_new': total.detach()}
             out['fake_image'] = generated_out['fake_image']
             out['input_semantics'] = input_semantics
             out['ref_semantics'] = ref_semantics

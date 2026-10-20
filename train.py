@@ -40,7 +40,7 @@ if __name__ == '__main__':
     #                      train=True, split=0.95, num_samples=4900, seed=52, 
     #                      index_file='train_indices_0319.npy')
 
-    data_path = '/PutYourFilesHere/AOdata/'
+    data_path = opt.dataroot
     train_dataset = SHDataset(opt, data_path, train=True, split=0.9)
 
     train_dataset.initialize(opt)
@@ -60,6 +60,7 @@ if __name__ == '__main__':
     mkdir(save_root)
 
     for epoch in iter_counter.training_epochs():
+        trainer.set_epoch(epoch)
         
         iter_counter.record_epoch_start(epoch)
         for i, data_i in enumerate(dataloader, start=iter_counter.epoch_iter):

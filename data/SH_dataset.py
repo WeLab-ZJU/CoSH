@@ -47,9 +47,14 @@ class SHDataset(BaseDataset):
         self.opt = opt
         self.train = train
         self.data_path = data_path
+        self.physics_cfg = None
+        image_dir = getattr(opt, 'sh_image_dir', 'images')
+        if getattr(opt, 'lambda_phys', 0.0) > 0:
+            from models.physics import load_config
+            self.physics_cfg = load_config(opt.physics_config)
 
         # 读取数据
-        self.images = os.listdir(data_path + '/images')
+        self.images = os.listdir(os.path.join(data_path, image_dir))
         self.labels = os.listdir(data_path + '/targets')
         self.ref = os.listdir(data_path + '/ref')
         self.label_ref = os.listdir(data_path + '/label_ref')
@@ -61,7 +66,15 @@ class SHDataset(BaseDataset):
         self.labels = np.array(self.labels)
 
         # 查看图片与标签数量是否一致
-        assert len(self.images) == len(self.labels), 'Number does not match'
+        if self.physics_cfg is not None:
+            # images_sys can be a subset. Pair by ID, never sorted list position.
+            targets = {os.path.splitext(name)[0]: name for name in self.labels}
+            stems = [os.path.splitext(name)[0] for name in self.images]
+            if len(set(stems)) != len(stems) or any(s not in targets for s in stems):
+                raise ValueError('SH image IDs must be unique and have matching phase targets')
+            self.labels = np.array([targets[s] for s in stems])
+        else:
+            assert len(self.images) == len(self.labels), 'Number does not match'
 
         self.transform = transform  # 定义做何种变换
 
@@ -70,7 +83,7 @@ class SHDataset(BaseDataset):
 
         for i in range(len(self.images)):  # 往空列表里装东西，为了之后索引
             self.images_and_labels.append(
-                (data_path + '/images/' + self.images[i], data_path + '/targets/' + self.labels[i])
+                (os.path.join(data_path, image_dir, self.images[i]), data_path + '/targets/' + self.labels[i])
             )
 
         self.images_and_labels = np.array(self.images_and_labels)
@@ -97,6 +110,16 @@ class SHDataset(BaseDataset):
         # 读取图片(distorted_SH)
         image = tifffile.imread(image_path)  # 读取tif为array
         image = torch.from_numpy(image).unsqueeze(dim=0).float()
+        physics_data = {}
+        if self.physics_cfg is not None:
+            cfg = self.physics_cfg
+            if cfg['amplitude']['kind'] == 'per_sample':
+                from models.physics import read_map
+                if not self.opt.physics_amplitude_dir:
+                    raise ValueError('Missing per-sample amplitude directory')
+                stem = os.path.splitext(os.path.basename(image_path))[0]
+                physics_data['physics_amplitude'] = read_map(os.path.join(
+                    self.opt.physics_amplitude_dir, stem + '.npy'))[0].float()
         image = (image - torch.min(image)) / (torch.max(image) - torch.min(image))
         # print(torch.max(image))
         # print(torch.min(image))
@@ -135,6 +158,7 @@ class SHDataset(BaseDataset):
                       'ref': ref,
                       'label_ref': label_ref
                       }
+        input_dict.update(physics_data)
         return input_dict
 
     def __len__(self):  # 必须写，返回数据集的长度
